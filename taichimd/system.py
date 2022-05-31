@@ -237,7 +237,7 @@ class MolecularDynamics(Simulation):
                 renderer=None):
         n_particles = sum(m.natoms * n for m, n in composition.items())
         max_atoms = max(m.natoms for m in composition.keys())
-        self.is_atomic = max_atoms == 1
+        self.is_atomic = max_atoms == 1 #TODO: ??
         self.temperature = float(temperature)
         self.composition = composition
         self.mol_objs = list(composition.keys())

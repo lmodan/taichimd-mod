@@ -156,7 +156,7 @@ class Coulomb(PairInteraction):
 
 
 @ti.data_oriented
-class HarmonicPair(PairInteraction):
+class HarmonicBond(PairInteraction):
 
     n_params = 2
 
@@ -177,6 +177,7 @@ class HarmonicPair(PairInteraction):
         r = ti.sqrt(r2)
         return k * r0 / (2 * r * r2)
 
+#TODO: what is this for a pair? k * r ** 2, for each atom?
 @ti.data_oriented
 class ParabolicPotential(PairInteraction):
 
@@ -233,7 +234,7 @@ dx/dr_0 = -dx/dr_1-dx/dr_2
 
 '''
 
-class BondBending(Interaction):
+class AngleInteraction(Interaction):
 
     '''
     Bond bending potentials operate on the angle cosine
@@ -250,7 +251,7 @@ class BondBending(Interaction):
         raise NotImplementedError
 
 
-class HarmonicBending(BondBending):
+class HarmonicAngle(AngleInteraction):
 
     n_params = 2
 
@@ -263,4 +264,6 @@ class HarmonicBending(BondBending):
     def derivative(self, cosx, args):
         k, theta0 = args[0], args[1]
         return - k * (ti.acos(cosx) - theta0) / ti.sqrt(1 - cosx ** 2)
+
+#TODO: dihedrals and impropers
 

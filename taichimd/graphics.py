@@ -62,7 +62,7 @@ class MolecularModel(t3.AutoInit):
             render_particle(self, camera, self.particles[i], self.radius, self.colors[self.system.type[i]])
         # bonds
         if ti.static(not self.system.is_atomic):
-            if ti.static(self.system.forcefield is not None and self.system.forcefield.bonded is not None):
+            if ti.static(self.system.forcefield is not None and self.system.forcefield.bonds is not None):
                 self.render_bonds(camera)
         # simulation box
         self.draw_simulation_box(camera)
@@ -99,7 +99,7 @@ class MolecularModel(t3.AutoInit):
 
     @ti.func
     def render_bonds(self, camera):
-        for x in range(self.system.forcefield.nbond):
+        for x in range(self.system.forcefield.nbonds):
             i, j = self.system.forcefield.bond[x][1], self.system.forcefield.bond[x][2]
             if (self.particles[i] - self.particles[j]).norm_sqr() < (0.5 * self.boxlength) ** 2:
                 render_cylinder(self, camera, self.particles[i], self.particles[j], self.radius * 0.6,
