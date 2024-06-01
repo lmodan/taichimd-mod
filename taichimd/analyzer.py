@@ -14,7 +14,7 @@ class EnergyAnalyzer(Analyzer):
         system.add_var("ek")
         self.ek = system.ek
         self.has_ep = hasattr(system, "ep")
-        if ti.static(system.gui is not None):
+        if ti.static(not system.gui == None):
             system.gui.add_component(Printer("Internal energy", self.energy_py))
         return super().register(system)
 

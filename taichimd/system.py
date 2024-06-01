@@ -7,6 +7,8 @@ from .common import *
 from .analyzer import *
 from .grid import *
 
+from .io import LMPdata
+
 class Boundary:
     '''
     Enum class for boundary conditions
@@ -27,17 +29,34 @@ class Simulation:
     def __init__(self, n_particles, 
                 integrator,
                 forcefield=None,
+                nframe=0,
                 boundary=Boundary.FREE,
-                boxlength=1,
+                boxlength=[],
                 grid=None,
-                renderer=MDRenderer):
+                renderer=None,
+                io=None,
+                isperiodic=[]):
+        
+        #there a bug from taichi, a vector, say as ti.Vector([10, 10, 10]) would still be equal to None type
+        if len(boxlength) == 0: #default simulation box size with matching dimensions
+            self.boxlength = ti.Vector([1.0] * DIM)
+        else:
+            self.boxlength = ti.Vector(boxlength)
+        if not len(isperiodic) > 0:
+            if ti.static(boundary == Boundary.PERIODIC): #default all PBC
+                self.isperiodic = ti.Vector([True] * DIM)
+            else:
+                self.isperiodic = ti.Vector([False] * DIM)                    
+        else:
+            self.isperiodic = isperiodic
+            
         self.n_particles = n_particles
+        self.cframe = 0
         self.boundary = boundary
-        self.boxlength = boxlength
         self.built = False
         self.particle_snode = ti.root.dense(ti.i, self.n_particles)
         self.variable_snode = ti.root
-        if ti.static(grid is not None):
+        if ti.static(not grid == None):
             self.grid_snode = None
         self.modules = []
         self.analyzers = []
@@ -46,10 +65,13 @@ class Simulation:
         self.initvals = []
 
         self.add_attr("position")
+        self.add_attr("position_unwrap")
         self.add_attr("velocity")
         self.add_attr("type", dims=(), dtype=ti.i32)
         self.integrator = self.add_module(integrator)
         self.dt = integrator.dt
+
+        self.nframe = nframe
 
         if self.integrator.requires_force:
             self.add_attr("force")
@@ -70,9 +92,12 @@ class Simulation:
 
         # spawns GUI
         if renderer:
+            renderer = MDRenderer
             self.gui = GUI(self, renderer)
         else:
             self.gui = None
+        if not io == None:
+            self.io = LMPdata(self, self.forcefield)
 
 
     def add_module(self, module):
@@ -107,7 +132,7 @@ class Simulation:
         self.add_layout(name, self.variable_snode, dims, dtype, requires_grad=requires_grad)
 
     def add_field(self, name, dims=(DIM,), dtype=ti.f32, requires_grad=False):
-        if ti.static(self.grid_snode is not None):
+        if ti.static(not self.grid_snode == None):
             self.add_layout(name, self.grid_snode, dims, dtype, requires_grad=requires_grad)
         else:
             print("Warning: the simulation system is not using grids,"
@@ -120,6 +145,7 @@ class Simulation:
         self.built = True
         if hasattr(self, "pos_np"):
             from_numpy_chk(self.position, self.pos_np)
+            from_numpy_chk(self.position_unwrap, self.pos_np)
         if hasattr(self, "vel_np"):
             from_numpy_chk(self.velocity, self.vel_np)
         if hasattr(self, "type_np"):
@@ -139,33 +165,54 @@ class Simulation:
         center = np.array(center).reshape(-1, DIM)
         origin = center - length / 2
         self.pos_np[start:end, :] = np.random.rand(n, DIM) * length + origin
-        if inittype is not None:
+        if not inittype == None:
             if not hasattr(self, "type_np"):
                 self.type_np = np.zeros(self.n_particles).astype(np.int)
             self.type_np[start:end] = inittype
-        
-
-
-
+   
     '''
     Runs the simulation.
     '''
-    def run(self, nframe=0, irender=10, save=False, pause=False):
+    def run(self, nframe=0, irender=10, save=False, pause=False, debug_thermo=False, output_data="", output_dump=""):
         if not self.built:
             self.build()
-        if nframe == 0:
-            nframe = int(1e12)
+
         play = not pause
-        for i in range(nframe):
+        if nframe == 0:
+            self.pseudostep()
+            play = False
+        else:
+            self.nframe = int(nframe+1)
+
+        for i in range(self.nframe):
+            if debug_thermo:
+                print("timestep:{}".format(i))
             if play:
                 self.step()
-            if self.gui is not None and irender > 0 and i % irender == 0:
+                self.cframe += 1
+            if not self.gui == None and irender > 0 and i % irender == 0:
                 if save:
                     play = self.gui.show("frame%i.png" % (i // irender)) 
                 else:
                     play = self.gui.show()
                 if pause:
                     play = not play
+
+            if len(output_data) and not self.io == None and irender > 0 and nframe>0 and i % irender == 0:
+                if "*" in output_data:#wildcard as current timstep
+                    elements=output_data.split("*")
+                    if len(elements)>3:
+                        raise NotImplementedError("More than one wildcards in save file name!") 
+                    else:
+                        head, tail=elements
+                        self.io.writeLMPDAT(output_data="{}{}{}".format(head, self.cframe, tail))
+                else:
+                    self.io.writeLMPDAT(output_data)
+            elif len(output_data) and not self.io == None and nframe == 0:
+                self.io.writeLMPDAT(output_data)
+                break
+            if len(output_dump) and not self.io == None and irender > 0 and nframe>0 and i % irender == 0:
+                self.io.writeLMPTRJ(output_dump)
 
     @ti.kernel
     def step(self):
@@ -176,14 +223,22 @@ class Simulation:
         if ti.static(self.analyzers):
             for analyzer in ti.static(self.analyzers):
                 analyzer.use()
-        
+                
+    @ti.kernel
+    def pseudostep(self):
+        self.calc_force()
+
+        self.apply_boundary()
+        if ti.static(self.analyzers):
+            for analyzer in ti.static(self.analyzers):
+                analyzer.use()
 
     @ti.func
     def calc_force(self):
         if ti.static(self.grids):
             for g in ti.static(self.grids):
                 g.use()
-        if ti.static(self.forcefield is not None):
+        if ti.static(not self.forcefield == None):
             self.forcefield.calc_force()
 
     '''
@@ -191,33 +246,42 @@ class Simulation:
     and wraps a particle into the simulation box.
     '''
     @ti.func
-    def calc_distance(self, x1, x2):
+    def wrap(self, x): ##need to be optimized, use floor function
+        
+        hbox = self.boxlength * 0.5 #element-wise multiplication is default for taichi math
+        
+        return x + ti.math.floor(self.isperiodic * (-x + hbox) / self.boxlength) * self.boxlength
+
+        #for i in ti.static(range(DIM)):
+        #    if x[i] <= 0:
+        #        x[i] = x[i] + self.boxlength[0]
+        #    elif x[i] > self.boxlength[0]:
+        #        x[i] = x[i] - self.boxlength[0]
+        #return x
+
+
+    @ti.func
+    def calc_distance(self, x1, x2): #need to be optimized, use floor function
+        
         dist = ti.Vector([0.0] * DIM)
         for i in ti.static(range(DIM)):
             dist[i] = x1[i] - x2[i]
-            if ti.static(self.boundary == Boundary.PERIODIC):
-                while dist[i] <= -0.5 * self.boxlength:
-                    dist[i] = dist[i] + self.boxlength
-                while dist[i] > 0.5 * self.boxlength:
-                    dist[i] = dist[i] - self.boxlength
-        return dist
-
-    @ti.func
-    def wrap(self, x):
-        for i in ti.static(range(DIM)):
-            if x[i] <= 0:
-                x[i] = x[i] + self.boxlength
-            elif x[i] > self.boxlength:
-                x[i] = x[i] - self.boxlength
-        return x
-
+            
+        return self.wrap(dist)
+        #    if ti.static(self.boundary == Boundary.PERIODIC):
+        #        while dist[i] <= -0.5 * self.boxlength[0]:
+        #            dist[i] = dist[i] + self.boxlength[0]
+        #        while dist[i] > 0.5 * self.boxlength[0]:
+        #            dist[i] = dist[i] - self.boxlength[0]
+        #return dist
+        
     @ti.func
     def apply_boundary(self):
         if ti.static(self.boundary == Boundary.PERIODIC):
-            for i in self.position:  
-                self.position[i] = self.wrap(self.position[i])
+            for i in self.position_unwrap:
+                self.position[i] = self.wrap(self.position_unwrap[i])
         elif ti.static(self.boundary == Boundary.REFLECTIVE):
-            for i in self.position:
+            for i in self.position_unwrap:
                 for d in ti.static(range(DIM)):
                     if self.position[i][d] < 0 or self.position[i][d] > self.boxlength:
                         self.velocity[i][d] = -self.velocity[i][d]
@@ -234,35 +298,38 @@ class MolecularDynamics(Simulation):
     def __init__(self, composition, boxlength, dt, forcefield,
                 integrator=VerletIntegrator, temperature=-1,
                 use_grid=False,
-                renderer=None):
+                renderer=None, io=None, isperiodic=[]):
         n_particles = sum(m.natoms * n for m, n in composition.items())
         max_atoms = max(m.natoms for m in composition.keys())
-        self.is_atomic = max_atoms == 1 #TODO: ??
+        self.is_atomic = max_atoms == 1 #a single atom is "atomic" otherwise it is molecular?
         self.temperature = float(temperature)
         self.composition = composition
         self.mol_objs = list(composition.keys())
         self.n_molecules = sum(composition.values())
 
-        if use_grid and forcefield.nonbond is not None:
+        if use_grid and not forcefield.nonbond == None:
+            print("USING GRID")
             grid = NeighborList(forcefield.nonbond.rcut)
         else:
+            print("NOT USING GRID")
             grid = None
 
         super().__init__(n_particles, integrator(dt), forcefield, 
             boundary=Boundary.PERIODIC,
             grid=grid,
-            boxlength=float(boxlength), renderer=renderer)
+            boxlength=boxlength, renderer=renderer, io=io, isperiodic=isperiodic)
 
         # molecule table
         if not self.is_atomic:
             self.molecule_snode = ti.root.dense(ti.i, self.n_molecules)
-            self.add_layout("moltypes", self.molecule_snode, dims=(), dtype=ti.i32)
-        if self.gui is not None and temperature > 0:
+            self.add_layout("molTyp", self.molecule_snode, dims=(), dtype=ti.i32)
+            self.add_layout("molIDperatom", self.particle_snode, dims=(), dtype=ti.i32)
+        if not self.gui == None and temperature > 0:
             self.gui.add_component(TemperatureControl())
+
         self.energy = EnergyAnalyzer()
         self.add_module(self.energy)
         
-           
     def set_temp(self, temperature):
         self.temperature = temperature
         self.integrator.set_temp(temperature)
@@ -274,16 +341,18 @@ class MolecularDynamics(Simulation):
         from_numpy_chk(self.type, np.array(types, dtype=int))
         if not self.is_atomic:
             i0 = 0
-            moltypes = []
-            mol_prefix = []
+            i0_peratom = 0
+            molTyp = []
+            molIDperatom = []
             for i, packed in enumerate(self.composition.items()):
-                m, n = packed
-                mol_prefix.append(np.arange(n) * m.natoms)
-                moltypes += [i] * n
+                m, n = packed #m as moleculeID (key), n as number of replicates
+                for j in range(n):
+                    molIDperatom.extend([j] * m.natoms) #molIDperatom as 1-D list for all atoms                    
+                molTyp += [i] * n 
                 self.forcefield.populate_tables(i0, m, n)
-                i0 += n
-            from_numpy_chk(self.moltypes, np.array(moltypes))
-            
+                i0 += n #in populate_tables, individual atomIDs are found via i0+np.arange(n)*m.natoms
+            from_numpy_chk(self.molTyp, np.array(molTyp))
+            from_numpy_chk(self.molIDperatom, np.array(molIDperatom))            
 
     @ti.func
     def get_temp(self) -> ti.f32:
@@ -304,7 +373,7 @@ class MolecularDynamics(Simulation):
         for i in range(DIM):
             if n_pow ** (DIM - i) * (n_pow + 1) ** i < self.n_molecules:
                 n_axes[i] += 1
-        dx = self.boxlength / n_axes
+        dx = self.boxlength[0] / n_axes #use 1st dimension as a temp workaround
         pos_cm = make_cell(n_axes, dx, self.n_molecules, x0=dx/2)
         pos_all = []
         i0 = 0
@@ -336,13 +405,12 @@ class MolecularDynamics(Simulation):
         vs *= np.sqrt(DIM * self.temperature * self.n_particles / np.sum(vs ** 2))
         from_numpy_chk(self.velocity, vs)
 
-
     def read_restart(self, position, velocity=None, centered=False):
         self.build()
         if centered:
-            position += np.ones(DIM) * self.boxlength / 2
-        from_numpy_chk(self.position, position)
-        if velocity is not None:
+            position += np.ones(DIM) * self.boxlength[0] / 2
+        from_numpy_chk(self.position_unwrap, position)
+        if not velocity == None:
             from_numpy_chk(self.velocity, velocity)
         elif self.temperature > 0:
             self.randomize_velocity()

@@ -19,16 +19,16 @@ class ClassicalFF(ForceField):
 
     is_conservative = True
 
-    MAX_ATOMTYPES = 32
-    MAX_BONDTYPES = 32
-    MAX_ANGLETYPES = 16
-    MAX_DIHEDRALTYPES = 16
-    MAX_IMPROPERTYPES = 16
+    MAX_ATOMTYPES = 256
+    MAX_BONDTYPES = 256
+    MAX_ANGLETYPES = 256
+    MAX_DIHEDRALTYPES = 256
+    MAX_IMPROPERTYPES = 256
 
-    MAX_BONDS = 6
-    MAX_ANGLES = 3
-    MAX_DIHEDRALS = 1
-    MAX_IMPROPERS = 1
+    MAX_BONDS = 16
+    MAX_ANGLES = 16
+    MAX_DIHEDRALS = 16
+    MAX_IMPROPERS = 16
 
     #def __init__(self, nonbond=None, bonded=None,
     #            bending=None, torsional=None,
@@ -65,12 +65,7 @@ class ClassicalFF(ForceField):
         self.impropers_params_d = impropers
         
     def register(self, system):
-        #if ti.static(system.is_atomic and (
-        #    self.bonded != None or self.bending != None\
-        #    or self.torsional != None
-        #)):
-        #    print("Warning: the simulation system does not have "
-        #        "any bond structure. Bonding/bending/torsional potentials will not be used.")  
+        #TODO: find out how to update topology on-the-fly
         # initialize data structures
         if ti.static(system.is_atomic and self.bonds != None):
             print("Warining: the simulation system does not have bonding definitions. Bonds/angles/dihedrals/impropers potentials will not be used.")
@@ -106,7 +101,7 @@ class ClassicalFF(ForceField):
             ti.root.dynamic(ti.i, self.MAX_IMPROPERS 
                     * system.n_particles).place(self.impropers)
             ti.root.pointer(ti.i, self.MAX_IMPROPERTYPES).place(self.impropers_params)
-        #TODO: what is intra?
+        #inta is used to turn off 1-2 and 1-3 interactions, probably better to use floats if 1-4 interaction should be counted as 0.5 
         if ti.static(not system.is_atomic):
             self.intra = ti.field(dtype=ti.i32) # boolean
             ti.root.bitmasked(ti.ij, (system.n_particles, system.n_particles)).place(self.intra)
@@ -151,7 +146,7 @@ class ClassicalFF(ForceField):
             for k, v in self.nonbond_params_d.items():
                 self.nonbond_params[k, k] = self.nonbond.fill_params(*v)
                 for k2, v2 in self.nonbond_params_d.items():
-                    v_comb = self.nonbond.combine(v, v2)
+                    v_comb = self.nonbond.mix(v, v2)
                     self.nonbond_params[k, k2] = v_comb
                     self.nonbond_params[k2, k] = v_comb
         # build bonds table and set parameters
@@ -188,15 +183,15 @@ class ClassicalFF(ForceField):
         if ti.static(not sys.is_atomic):
             not_excl = self.intra[i, j] == 0
         if i < j and not_excl:
-            d = sys.calc_distance(sys.position[j], sys.position[i])
+            d = sys.calc_distance(sys.position_unwrap[j], sys.position_unwrap[i])
             r2 = (d ** 2).sum()
             itype = sys.type[i]
             jtype = sys.type[j]
             params = self.nonbond_params[itype, jtype]
-            uij = self.nonbond(r2, params)
+            uij = self.nonbond.energy(r2, params) #modded from __call__ in pair-wise interactions
             if uij != 0.0:
                 sys.ep[None] += uij
-                force = self.nonbond.force(d, r2, params)
+                force = self.nonbond.force(d, r2, params) 
                 # += performs atomic add
                 sys.force[i] += force
                 sys.force[j] -= force
@@ -214,19 +209,19 @@ class ClassicalFF(ForceField):
         for i in sys.force:
             sys.force[i].fill(0.0)
             if ti.static(self.external != None):
-                sys.ep[None] += self.external(sys.position[i])
-                sys.force[i] += self.external.force(sys.position[i])
+                sys.ep[None] += self.external(sys.position_unwrap[i])
+                sys.force[i] += self.external.force(sys.position_unwrap[i])
                 if ti.static(sys.integrator.requires_hessian):
-                    sys.hessian[i, i] += self.external.hessian(sys.position[i])
+                    sys.hessian[i, i] += self.external.hessian(sys.position_unwrap[i])
 
         if ti.static(self.nonbond != None):
             #ti.block_dim(64)
-            if ti.static(sys.grids is not None and hasattr(sys, "n_neighbors")):
+            if ti.static(not sys.grids == None and hasattr(sys, "n_neighbors")):
                 ti.block_dim(128) #TODO: what is this?
                 for i in sys.n_neighbors:
                     for j in range(sys.n_neighbors[i]):
                         self.force_nonbond(i, sys.neighbors[i, j])
-            elif ti.static(sys.grids is not None and hasattr(sys, "neighbors")):
+            elif ti.static(not sys.grids == None and hasattr(sys, "neighbors")):
                 for i, j in sys.neighbors:
                     self.force_nonbond(i, j)
             else:
@@ -237,13 +232,13 @@ class ClassicalFF(ForceField):
             for x in range(self.nbonds):
                 bondtype, i, j = self.bond[x][0], self.bond[x][1], self.bond[x][2]
                 params = self.bonds_params[bondtype]
-                d = sys.calc_distance(sys.position[j], sys.position[i])
+                d = sys.calc_distance(sys.position_unwrap[j], sys.position_unwrap[i])
                 if ti.static(self.bonds == None):
                     raise NotImplementedError("Rigid bonds are not implemented yet!") 
                 else:
                     #harmonic bonds
                     r2 = (d ** 2).sum()
-                    sys.ep[None] += self.bonds(r2, params)
+                    sys.ep[None] += self.bonds.energy(r2, params)#modded from __call__ in pair-wise interactions
                     force = self.bonds.force(d, r2, params)
                     sys.force[i] += force
                     sys.force[j] -= force
@@ -260,8 +255,8 @@ class ClassicalFF(ForceField):
             for x in range(self.nangles):
                 angletype, i, j, k = self.angle[x][0], self.angle[x][1], self.angle[x][2], self.angle[x][3]
                 params = self.angles_params[bendtype]
-                v1 = sys.calc_distance(sys.position[i], sys.position[j])
-                v2 = sys.calc_distance(sys.position[k], sys.position[j])
+                v1 = sys.calc_distance(sys.position_unwrap[i], sys.position_unwrap[j])
+                v2 = sys.calc_distance(sys.position_unwrap[k], sys.position_unwrap[j])
                 if ti.static(self.angles == None):
                     raise NotImplementedError("Rigid angles are not implemented yet!") 
                 else:

@@ -62,7 +62,7 @@ class MolecularModel(t3.AutoInit):
             render_particle(self, camera, self.particles[i], self.radius, self.colors[self.system.type[i]])
         # bonds
         if ti.static(not self.system.is_atomic):
-            if ti.static(self.system.forcefield is not None and self.system.forcefield.bonds is not None):
+            if ti.static(not self.system.forcefield == None and not self.system.forcefield.bonds == None):
                 self.render_bonds(camera)
         # simulation box
         self.draw_simulation_box(camera)
@@ -131,7 +131,7 @@ class MolecularModel(t3.AutoInit):
                 if dy > 0:
                     ftot = form_factor_floor(norm_world, dy, self.radius)
                 gtot = vec3(0.0)
-                if ti.static(self.grid is not None):
+                if ti.static(not self.grid == None):
                     base = self.grid.grid_index(pos_world)
                     for dI in ti.grouped(ti.ndrange((-4, 5), (-4, 5), (-4, 5))):
                         I = max(0, min(base + dI, self.grid.gridsize - 1))
@@ -174,9 +174,9 @@ class FalloffLight(t3.Light):
 
     def __init__(self, direction=None, target=None, color=None,
             c1=None, c2=None, follow_camera=True):
-        if c1 is not None: 
+        if not c1 == None: 
             self.c1 = c1
-        if c2 is not None: 
+        if not c2 == None: 
             self.c2 = c2
         self.follow_camera = follow_camera
         self.target_py = target or [0, 0, 0]

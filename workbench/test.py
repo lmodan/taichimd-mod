@@ -8,19 +8,20 @@ from taichimd.system import MolecularDynamics
 from taichimd.interaction import *
 from taichimd.molecule import Molecule
 from taichimd.forcefield import ClassicalFF
-from taichimd.ui import *
+#from taichimd.ui import *
 
 from taichimd.integrator import NVTIntegrator
+from taichimd.io import LMPdata
 
 nchain = 10
-boxlength = 160
+boxlength = [160, 160, 160]
 dt=0.0005
 l0 = 1.54
 lchain = 100
 pos = np.zeros((nchain, lchain, DIM))
 pos[:, :, 0] = np.arange(lchain) * l0
 for i in range(nchain):
-    pos[i, :, 1] += boxlength / 1.2 / nchain * i
+    pos[i, :, 1] += boxlength[0] / 1.2 / nchain * i
 pos = pos.reshape(nchain * lchain, DIM)
 # center the molecule
 pos -= np.mean(pos, axis=0)
@@ -31,7 +32,7 @@ temperature = 573.0
 adj = np.eye(lchain, k=1) + np.eye(lchain, k=-1)
 intra = (adj + adj@adj + adj@adj@adj).astype(bool)
 
-gui=True
+gui=False
 
 ti.init(arch=ti.cuda)
 
@@ -40,7 +41,10 @@ mol = Molecule([1] * lchain,
     intra=intra)
 ff = ClassicalFF(nonbond=LennardJones(rcut=14), bonds=HarmonicBond())
 ff.set_params(nonbond={1:[3.95,46.0]}, bonds={1:[96500.0/2, l0]})
-md = MolecularDynamics({mol: nchain}, boxlength, dt, ff, NVTIntegrator, temperature=temperature, renderer=MDRenderer if gui else None)
+
+md = MolecularDynamics({mol: nchain}, boxlength, dt, ff, NVTIntegrator, temperature=temperature, renderer=MDRenderer if gui else None, io=LMPdata)
 md.read_restart(pos, centered=True)
 md.randomize_velocity(keep_molecules=False)
-md.run(irender=64)
+md.run(nframe=1e4, irender=1e3, output_data="data.snap.*", debug_thermo=True, output_dump="test.lammpstrj")
+md.run(nframe=0, output_data="data.end")
+print("Simulation finished!")

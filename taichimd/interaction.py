@@ -16,8 +16,8 @@ class Interaction:
 @ti.data_oriented
 class ExternalPotential(Interaction):
 
-    def __call__(self, r):
-        pass
+    def energy(self, r):
+        raise NotImplementedError
 
     def force(self, r):
         raise ForceNotImplemented
@@ -33,7 +33,7 @@ class QuadraticWell(ExternalPotential):
         self.center = ti.Vector(center)
 
     @ti.func
-    def __call__(self, r):
+    def energy(self, r):
         return self.k * ((r - self.center) ** 2).sum() / 2
 
     @ti.func
@@ -52,7 +52,7 @@ class InverseSquare(ExternalPotential):
         self.center = center
 
     @ti.func
-    def __call__(self, r):
+    def energy(self, r):
         return self.k / (r - self.center).norm()
 
     @ti.func
@@ -69,7 +69,7 @@ Pair interactions
 class PairInteraction(Interaction):
 
  
-    def __call__(self, r2, args):
+    def energy(self, r2, args):
         raise NotImplementedError
 
     def derivative(self, r2, args):
@@ -100,7 +100,7 @@ class LennardJones(PairInteraction):
         self.irc12 = self.irc6 ** 2
    
     @ti.func
-    def __call__(self, r2, args):
+    def energy(self, r2, args):
         u = 0.0
         if ti.static(self.rcut <= 0) or 0 < r2 < self.rc2:
             s12, s6, e = args[0], args[1], args[2]
@@ -124,12 +124,15 @@ class LennardJones(PairInteraction):
         s12 = s6 ** 2
         return [s12, s6, epsilon]
 
-    def combine(self, v1, v2):
+    def mix(self, v1, v2, rule="arithmetic"): #mixing rule
         s_i, e_i = v1[0], v1[1]
         s_j, e_j = v2[0], v2[1]
-        return self.fill_params(
-            (s_i + s_j) / 2., ti.sqrt(e_i * e_j))
-
+        if rule=="geometric":
+            return self.fill_params( ti.sqrt(s_i * s_j), ti.sqrt(e_i * e_j))
+        elif rule=="arithmetic":
+            return self.fill_params((s_i + s_j) / 2., ti.sqrt(e_i * e_j))
+        else:
+            raise NotImplementedError
 
 @ti.data_oriented
 class Coulomb(PairInteraction):
@@ -138,7 +141,7 @@ class Coulomb(PairInteraction):
     
     
     @ti.func
-    def __call__(self, r2, args):
+    def energy(self, r2, args):
         k = args[0]
         return k / ti.sqrt(r2)
 
@@ -161,7 +164,7 @@ class HarmonicBond(PairInteraction):
     n_params = 2
 
     @ti.func
-    def __call__(self, r2, args):
+    def energy(self, r2, args):
         k, r0 = args[0], args[1]
         r = ti.sqrt(r2)
         return k * (r - r0) ** 2 / 2
@@ -185,7 +188,7 @@ class ParabolicPotential(PairInteraction):
 
 
     @ti.func
-    def __call__(self, r2, args):
+    def energy(self, r2, args):
         k = args[0]
         r = ti.sqrt(r2)
         return k * r ** 2 / 2
@@ -244,7 +247,7 @@ class AngleInteraction(Interaction):
     '''
 
     @ti.func
-    def __call__(self, cosx, args):
+    def energy(self, cosx, args):
         raise NotImplementedError
     @ti.func
     def derivative(self, cosx, args):
@@ -256,7 +259,7 @@ class HarmonicAngle(AngleInteraction):
     n_params = 2
 
     @ti.func
-    def __call__(self, cosx, args):
+    def energy(self, cosx, args):
         k, theta0 = args[0], args[1]
         return 1/2. * k * (ti.acos(cosx) - theta0) ** 2
     

@@ -30,7 +30,7 @@ class TemperatureControl(UIComponent):
         gui = self.window.gui
         t_actual = system.get_temp_py()
         t_set = system.temperature
-        if gui.event is not None:
+        if not gui.event == None:
             if gui.event.type == ti.GUI.PRESS and gui.event.key == ti.GUI.UP:
                 t_set = round(t_set + 0.1, 1)
                 system.set_temp(t_set)
@@ -69,7 +69,7 @@ class Toggler(UIComponent):
 
     def show(self):
         gui = self.window.gui
-        if gui.event is not None:
+        if not gui.event == None:
             if gui.event.type == ti.GUI.PRESS and gui.event.key == self.key:
                 self.toggle()
         value = self.fmt % self.getter()
@@ -104,7 +104,7 @@ class GUI:
     def show(self, savefile=None):
         self.gui.get_event()
         self.gui.running = not self.gui.is_pressed(ti.GUI.ESCAPE)
-        if self.gui.event is not None and self.gui.event.type == ti.GUI.PRESS\
+        if not self.gui.event == None and self.gui.event.type == ti.GUI.PRESS\
                 and self.gui.event.key == ti.GUI.SPACE:
             self.play = not self.play
             self.gui.event = None
@@ -195,7 +195,7 @@ try:
             else:
                 epsilon = boxlength / 50
             self.radius = self.radius * epsilon
-            if hasattr(self.system.forcefield, "bonded") and self.system.forcefield.bonded != None:
+            if hasattr(self.system.forcefield, "bonds") and self.system.forcefield.bonds != None:
                 self.radius /= 2
             self.scene = self._scene()
             self.camera = t3.Camera(res=(WINDOW_SIZE, WINDOW_SIZE), pos=[boxlength/2, boxlength/2, -boxlength], 

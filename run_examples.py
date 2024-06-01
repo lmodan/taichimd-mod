@@ -57,4 +57,4 @@ if __name__ == "__main__":
         md = propane(512, 423, 0.001, integrator)
     else:
         raise ValueError("Unknown system!")
-    md.run(irender=irender)
+    md.run(nframe=10)

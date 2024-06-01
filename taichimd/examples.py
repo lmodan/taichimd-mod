@@ -47,6 +47,7 @@ def oscillator(dt, integrator, gui=True):
     return md
 
 def chain(nchain, temp, dt, integrator, gui=True):
+    gui=False
     boxlength = 160
     l0 = 1.54
     lchain = 100
@@ -68,8 +69,8 @@ def chain(nchain, temp, dt, integrator, gui=True):
         bond=[[1, i, i+1] for i in range(lchain - 1)],
         intra=intra)
     ff = ClassicalFF(nonbond=LennardJones(rcut=14),
-            bonded=HarmonicPair())
-    ff.set_params(nonbond={1:[3.95,46.0]}, bonded={1:[96500.0/2, l0]})
+            bonds=HarmonicBond())
+    ff.set_params(nonbond={1:[3.95,46.0]}, bonds={1:[96500.0/2, l0]})
     md = MolecularDynamics({mol: nchain}, boxlength, dt, ff,
         integrator, temperature=temperature,
         renderer=MDRenderer if gui else None)
@@ -79,6 +80,7 @@ def chain(nchain, temp, dt, integrator, gui=True):
 
 
 def propane(nmolec, temp, dt, integrator, gui=True):
+    gui=False
     boxlength = 50
     l0 = 1.54
     theta0 = 114 * PI / 180
@@ -88,15 +90,17 @@ def propane(nmolec, temp, dt, integrator, gui=True):
     struc -= np.mean(struc, axis=0)
     mol = Molecule([1, 2, 1],
         bond=[[1, 0, 1],[1, 1, 2]],
-        bending=[[1, 0, 1, 2]],
+        angle=[[1, 0, 1, 2]],
         struc=struc)
+    #propane as C3H8 contains 3 C atoms as types 1:C in CH3 and 2: C in CH2, where bonds are saved between the CH3-CH2, and CH2-CH3, one angle type 1:0-1-2 is defined
+    #all hydrogen atoms are omitted
     ff = ClassicalFF(nonbond=LennardJones(rcut=14),
-        bonded=HarmonicPair(),
-        bending=HarmonicBending(),
+        bonds=HarmonicBond(),
+        angles=HarmonicAngle(),
         )
     ff.set_params(nonbond={1:[3.75,98.0],2:[3.95,46.0]},
-        bonded={1:[96500, l0]},
-        bending={1:[62500, theta0]})
+        bonds={1:[96500, l0]},
+        angles={1:[62500, theta0]})
     md = MolecularDynamics({mol: nmolec}, boxlength, dt, ff,
         integrator, temperature=temp,
         renderer=MDRenderer if gui else None)

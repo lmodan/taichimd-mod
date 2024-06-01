@@ -10,7 +10,7 @@ class Integrator(Module):
 
     def __init__(self, dt, requires_force=None):
         self.dt = dt
-        if requires_force is not None:
+        if not requires_force == None:
             self.requires_force = requires_force
 
     def register(self, system):
@@ -39,8 +39,8 @@ class ForwardEulerIntegrator(Integrator):
 
     @ti.func
     def poststep(self):
-        for i in self.system.position:
-            self.system.position[i] = self.system.position[i] \
+        for i in self.system.position_unwrap:
+            self.system.position_unwrap[i] = self.system.position_unwrap[i] \
                         + self.system.velocity[i] * self.dt
             if ti.static(self.requires_force):
                 self.system.velocity[i] = self.system.velocity[i] + self.system.force[i] * self.dt
@@ -56,15 +56,15 @@ class VerletIntegrator(Integrator):
         Integrate the motion of particles. Use Newton's law of motion and 
         verlet integration scheme. Also calculates the kinetic and potential energies.
         '''
-        for i in self.system.position:
-            self.system.position[i] = self.system.position[i] \
+        for i in self.system.position_unwrap:
+            self.system.position_unwrap[i] = self.system.position_unwrap[i] \
                         + self.system.velocity[i] * self.dt * 0.5
     @ti.func
     def poststep(self):
-        for i in self.system.position:
+        for i in self.system.position_unwrap:
             if ti.static(self.requires_force):
                 self.system.velocity[i] = self.system.velocity[i] + self.system.force[i] * self.dt
-            self.system.position[i] = self.system.position[i] \
+            self.system.position_unwrap[i] = self.system.position_unwrap[i] \
                         + self.system.velocity[i] * self.dt * 0.5
 
         
@@ -73,7 +73,6 @@ class NVTIntegrator(VerletIntegrator):
     # thermostat "damping" coefficients
     Q1 = 5
     Q2 = 5
-
 
     def register(self, system):
         self.temp = ti.field(dtype=ti.f64, shape=())
@@ -184,11 +183,11 @@ class FixedPointSolver:
     @ti.kernel
     def substep(self, dt:ti.f32) -> ti.f32:
         loss = 0.0
-        for i in self.system.position:
-            self.system.position[i] += self.vbefore[i] * dt
+        for i in self.system.position_unwrap:
+            self.system.position_unwrap[i] += self.vbefore[i] * dt
         self.system.calc_force()
-        for i in self.system.position:
-            self.system.position[i] -= self.vbefore[i] * dt
+        for i in self.system.position_unwrap:
+            self.system.position_unwrap[i] -= self.vbefore[i] * dt
             self.vafter[i] = self.system.velocity[i] + self.system.force[i] * dt
             #print(i, ((self.vafter[i] - self.vbefore[i]) ** 2).sum())
             loss += ((self.vafter[i] - self.vbefore[i]) ** 2).sum()
@@ -242,15 +241,15 @@ class ImplicitMidpointIntegrator(ImplicitIntegrator):
     @ti.func
     def prestep(self):
         super().prestep()
-        for i in self.system.position:
+        for i in self.system.position_unwrap:
             self.system.velocity[i] = self.vafter[i]
-            self.system.position[i] = self.system.position[i] \
+            self.system.position_unwrap[i] = self.system.position_unwrap[i] \
                         + self.system.velocity[i] * self.dt * 0.5
 
     @ti.func
     def integrate_motion(self):
-        for i in self.system.position:
-            self.system.position[i] = self.system.position[i] \
+        for i in self.system.position_unwrap:
+            self.system.position_unwrap[i] = self.system.position_unwrap[i] \
                         + self.system.velocity[i] * self.dt * 0.5
             self.system.velocity[i] += self.system.force[i] * self.dt * 0.5
 
@@ -265,9 +264,9 @@ class BackwardEulerIntegrator(ImplicitIntegrator):
 
     @ti.kernel
     def integrate_motion(self):
-        for i in self.system.position:
+        for i in self.system.position_unwrap:
             self.system.velocity[i] = self.vafter[i]
-            self.system.position[i] = self.system.position[i] \
+            self.system.position_unwrap[i] = self.system.position_unwrap[i] \
                         + self.system.velocity[i] * self.dt
 
 

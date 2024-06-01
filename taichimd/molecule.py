@@ -16,7 +16,8 @@ class Molecule:
         self.angle = angle or []
         self.dihedral = dihedral or []
         self.improper = improper or []
-        self.intra = intra if intra is not None else np.ones((self.natoms, self.natoms), dtype=int)
+
+        self.intra = intra if not intra is None else np.ones((self.natoms, self.natoms), dtype=int)
         self.struc = struc
         if struc is None:
             self._get_struc()

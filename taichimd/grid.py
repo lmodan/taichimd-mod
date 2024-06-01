@@ -16,7 +16,7 @@ class Grid(Module):
         super().register(system)
         self.dx = system.boxlength / self.gridsize
         self.inv_dx = 1 / self.dx
-        self.position = system.position
+        self.position = system.position_unwrap
         self.system.grid_snode = self.get_snode()
         self.layout()
         return self
@@ -41,7 +41,7 @@ class Grid(Module):
             X = self.grid_index(self.position[i])
             self.p2g(i, X)
         if ti.static(self.dynamics):
-            if ti.static(self.grid is not None):
+            if ti.static(not self.grid == None):
                 for X in ti.grouped(self.grid):
                     self.grid_step(X)
             else:
