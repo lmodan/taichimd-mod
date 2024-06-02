@@ -8,6 +8,7 @@ from .analyzer import *
 from .grid import *
 
 from .io import LMPdata
+import os
 
 class Boundary:
     '''
@@ -63,11 +64,16 @@ class Simulation:
         self.grids = []
         self.fields = []
         self.initvals = []
+        self.masses_d = {}
 
+        #per atom
         self.add_attr("position")
         self.add_attr("position_unwrap")
         self.add_attr("velocity")
+        
         self.add_attr("type", dims=(), dtype=ti.i32)
+        self.add_attr("masses", dims=(), dtype=ti.i32)
+        
         self.integrator = self.add_module(integrator)
         self.dt = integrator.dt
 
@@ -150,10 +156,13 @@ class Simulation:
             from_numpy_chk(self.velocity, self.vel_np)
         if hasattr(self, "type_np"):
             from_numpy_chk(self.type, self.type_np)
+        if hasattr(self, "masses_np"):
+            from_numpy_chk(self.masses, self.masses_np)
         print("[TaichiMD] Simulation system has been built")
 
     def fill_composition(self):
         self.type.fill(0)
+        self.masses.fill(1.0)
 
     def init_random(self, center=(0.5, 0.5, 0.5), length=1,
             start=0, end=None, inittype=None):
@@ -176,6 +185,10 @@ class Simulation:
     def run(self, nframe=0, irender=10, save=False, pause=False, debug_thermo=False, output_data="", output_dump=""):
         if not self.built:
             self.build()
+            
+        if len(output_dump) and os.path.isfile(output_dump):
+            print("Warning: designated output_dump file already exists, old data will be overwritten as new data is saved.")
+            os.remove(output_dump) #if the dump file is already there
 
         play = not pause
         if nframe == 0:

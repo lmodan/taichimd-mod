@@ -41,7 +41,7 @@ class LMPdata(IO):
     def readfromFields(self):
         Lx, Ly, Lz = self.system.boxlength
         self.box = [[-Lx/2., -Ly/2., -Lz/2.],[Lx/2., Ly/2., Lz/2.], [0.0, 0.0, 0.0]]
-        positions_unwrap = self.system.position_unwrap.to_numpy()
+        positions_unwrap = self.system.position_unwrap.to_numpy() #positions_unwrp is ordered
         for idx, atom in enumerate(positions_unwrap):
             if DIM == 2: #DIM in consts
                 z = 0.0
@@ -54,6 +54,9 @@ class LMPdata(IO):
             typ = self.system.type[idx]
             q = 0.0 #hardcoded for CG simulations
             self.atoms[idx+1] = [molID, typ, q, x, y, z]
+        
+        for atyp, amass in self.system.masses_d.items():
+            self.masses[atyp]=amass
 
         if hasattr(self.forcefield, "bonds_np"):
             for idx, bond in enumerate(self.forcefield.bonds_np):
@@ -96,11 +99,7 @@ class LMPdata(IO):
             self.nimpropertypes = np.max([atom[0] for i,(k,atom) in enumerate(self.impropers.items())])
         else:
             self.nimpropertypes = 0
-        for atom in range(self.natomtypes):
-            atom += 1 #start from type 1 rather than 0
-            if not atom in self.masses:
-                self.masses[atom] = 1.0
-                
+
         if not all(tilt == 0 for tilt in self.box[2]):
             self.istriclinic = True
     def writeLMPDAT(self, output_data="data.lammpsdat"):

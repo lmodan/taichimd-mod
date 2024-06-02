@@ -40,11 +40,11 @@ mol = Molecule([1] * lchain,
     bond=[[1, i, i+1] for i in range(lchain - 1)],
     intra=intra)
 ff = ClassicalFF(nonbond=LennardJones(rcut=14), bonds=HarmonicBond())
-ff.set_params(nonbond={1:[3.95,46.0]}, bonds={1:[96500.0/2, l0]})
+ff.set_params(masses={1: 10.0}, nonbond={1:[3.95,46.0]}, bonds={1:[96500.0/2, l0]}) #nonbonded interaction as mass, sigma, epsilon
 
 md = MolecularDynamics({mol: nchain}, boxlength, dt, ff, NVTIntegrator, temperature=temperature, renderer=MDRenderer if gui else None, io=LMPdata)
 md.read_restart(pos, centered=True)
 md.randomize_velocity(keep_molecules=False)
-md.run(nframe=1e4, irender=1e3, output_data="data.snap.*", debug_thermo=True, output_dump="test.lammpstrj")
-md.run(nframe=0, output_data="data.end")
+md.run(nframe=1e4, irender=1e3, output_data="workbench/data.snap.*", debug_thermo=False, output_dump="workbench/test.lammpstrj")
+md.run(nframe=0, output_data="workbench/data.end")
 print("Simulation finished!")

@@ -130,7 +130,7 @@ class LennardJones(PairInteraction):
         if rule=="geometric":
             return self.fill_params( ti.sqrt(s_i * s_j), ti.sqrt(e_i * e_j))
         elif rule=="arithmetic":
-            return self.fill_params((s_i + s_j) / 2., ti.sqrt(e_i * e_j))
+            return self.fill_params( (s_i + s_j) / 2., ti.sqrt(e_i * e_j))
         else:
             raise NotImplementedError
 

@@ -33,8 +33,9 @@ class ClassicalFF(ForceField):
     #def __init__(self, nonbond=None, bonded=None,
     #            bending=None, torsional=None,
     #            external=None):
-    def __init__(self, nonbond=None, bonds=None, angles=None, dihedrals=None, impropers=None, external=None):
-        # force types
+    def __init__(self, masses=None, nonbond=None, bonds=None, angles=None, dihedrals=None, impropers=None, external=None):
+
+        self.masses = masses
         self.nonbond = nonbond
 
         #Modan: reassigning the potential terms
@@ -52,7 +53,9 @@ class ClassicalFF(ForceField):
 
     #def set_params(self, nonbond=None, 
     #        bonded=None, bending=None, torsional=None):
-    def set_params(self, nonbond=None, bonds=None, angles=None, dihedrals=None, impropers=None):
+    def set_params(self, masses=None, nonbond=None, bonds=None, angles=None, dihedrals=None, impropers=None):
+
+        self.masses_params_d = masses
         self.nonbond_params_d = nonbond
         
         #Modan: reassigning the potential terms
@@ -143,12 +146,21 @@ class ClassicalFF(ForceField):
         sys = self.system
         # set nonbond parameters
         if ti.static(self.nonbond != None):
+            mass_np = []
+            for aid in range(sys.type.shape[0]): # cannot enumerate directly with peratom types
+                atyp = sys.type[aid]
+                if not atyp in sys.masses_d:
+                    mass = self.masses_params_d[atyp]
+                    sys.masses_d[atyp] = mass #atomtypes start from 1
+                mass_np.append(mass)
+            sys.masses_np=np.array(mass_np)
+
             for k, v in self.nonbond_params_d.items():
-                self.nonbond_params[k, k] = self.nonbond.fill_params(*v)
+                self.nonbond_params[k, k] = self.nonbond.fill_params(*v)  
                 for k2, v2 in self.nonbond_params_d.items():
-                    v_comb = self.nonbond.mix(v, v2)
-                    self.nonbond_params[k, k2] = v_comb
-                    self.nonbond_params[k2, k] = v_comb
+                    v_mix = self.nonbond.mix(v, v2)
+                    self.nonbond_params[k, k2] = v_mix
+                    self.nonbond_params[k2, k] = v_mix
         # build bonds table and set parameters
         if ti.static(not sys.is_atomic and self.bonds != None):
             for k, v in self.bonds_params_d.items():
@@ -158,7 +170,6 @@ class ClassicalFF(ForceField):
             self.nbonds = self.bonds_np.shape[0]
         # build angles table
         if ti.static(not sys.is_atomic and self.angles != None):
-            
             for k, v in self.angles_params_d.items():
                 self.angles_params[k] = self.angle.fill_params(*v)
             self.angles_np = np.vstack(self.angles_np)
@@ -187,14 +198,18 @@ class ClassicalFF(ForceField):
             r2 = (d ** 2).sum()
             itype = sys.type[i]
             jtype = sys.type[j]
+            
+            imass = sys.masses[i]
+            jmass = sys.masses[j]
+                        
             params = self.nonbond_params[itype, jtype]
             uij = self.nonbond.energy(r2, params) #modded from __call__ in pair-wise interactions
             if uij != 0.0:
                 sys.ep[None] += uij
                 force = self.nonbond.force(d, r2, params) 
                 # += performs atomic add
-                sys.force[i] += force
-                sys.force[j] -= force
+                sys.force[i] += force / imass
+                sys.force[j] -= force / jmass
                 if ti.static(sys.integrator.requires_hessian):
                     h = self.nonbond.hessian(d, r2, params)
                     sys.hessian[i, j] = h
@@ -215,9 +230,8 @@ class ClassicalFF(ForceField):
                     sys.hessian[i, i] += self.external.hessian(sys.position_unwrap[i])
 
         if ti.static(self.nonbond != None):
-            #ti.block_dim(64)
             if ti.static(not sys.grids == None and hasattr(sys, "n_neighbors")):
-                ti.block_dim(128) #TODO: what is this?
+                ti.block_dim(64) #for loop decorator for parallelization
                 for i in sys.n_neighbors:
                     for j in range(sys.n_neighbors[i]):
                         self.force_nonbond(i, sys.neighbors[i, j])
@@ -231,6 +245,8 @@ class ClassicalFF(ForceField):
         if ti.static(not sys.is_atomic and self.bonds != None):
             for x in range(self.nbonds):
                 bondtype, i, j = self.bond[x][0], self.bond[x][1], self.bond[x][2]
+                imass = sys.masses[i]
+                jmass = sys.masses[j]
                 params = self.bonds_params[bondtype]
                 d = sys.calc_distance(sys.position_unwrap[j], sys.position_unwrap[i])
                 if ti.static(self.bonds == None):
@@ -240,8 +256,8 @@ class ClassicalFF(ForceField):
                     r2 = (d ** 2).sum()
                     sys.ep[None] += self.bonds.energy(r2, params)#modded from __call__ in pair-wise interactions
                     force = self.bonds.force(d, r2, params)
-                    sys.force[i] += force
-                    sys.force[j] -= force
+                    sys.force[i] += force / imass
+                    sys.force[j] -= force / jmass
                     if ti.static(sys.integrator.requires_hessian):
                         h = self.bonds.hessian(d, r2, params)
                         sys.hessian[i, j] = h
@@ -254,6 +270,9 @@ class ClassicalFF(ForceField):
                 raise NotImplementedError("Hessian not supported for angle potentials!")
             for x in range(self.nangles):
                 angletype, i, j, k = self.angle[x][0], self.angle[x][1], self.angle[x][2], self.angle[x][3]
+                imass = sys.masses[i]
+                jmass = sys.masses[j]
+                kmass = sys.masses[k]
                 params = self.angles_params[bendtype]
                 v1 = sys.calc_distance(sys.position_unwrap[i], sys.position_unwrap[j])
                 v2 = sys.calc_distance(sys.position_unwrap[k], sys.position_unwrap[j])
@@ -272,9 +291,9 @@ class ClassicalFF(ForceField):
                     u = 1 / l1 / l2
                     f1 = (v2 - d / l1 ** 2 * v1) * u
                     f2 = (v1 - d / l2 ** 2 * v2) * u
-                    sys.force[i] -= f1 * d_cosx
-                    sys.force[k] -= f2 * d_cosx
-                    sys.force[j] += (f1 + f2) * d_cosx
+                    sys.force[i] -= f1 * d_cosx / imass
+                    sys.force[k] -= f2 * d_cosx / jmass
+                    sys.force[j] += (f1 + f2) * d_cosx / kmass
 
         # TODO: implementation of dihedrals and impropers
 
