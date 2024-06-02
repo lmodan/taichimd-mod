@@ -68,7 +68,8 @@ class ClassicalFF(ForceField):
         self.impropers_params_d = impropers
         
     def register(self, system):
-        #TODO: find out how to update topology on-the-fly
+        #Even if with on-the-fly updates in the molecular topology, the max storage reserved for the entire system should be constant, hence registration is required only once.
+        #If more atoms should be added, all quantities with system.n_particles should be reallocated with new RAM?
         # initialize data structures
         if ti.static(system.is_atomic and self.bonds != None):
             print("Warining: the simulation system does not have bonding definitions. Bonds/angles/dihedrals/impropers potentials will not be used.")
@@ -111,7 +112,7 @@ class ClassicalFF(ForceField):
         return super().register(system)
 
 
-    def populate_tables(self, i0, m, n):
+    def populate_tables(self, i0, m, n): #fill the FF table with known composition of molecules * n
         sys = self.system
         if ti.static(not sys.is_atomic and self.bonds != None):
             table = np.tile(np.array(m.bond), (n, 1, 1))
@@ -132,7 +133,19 @@ class ClassicalFF(ForceField):
         if ti.static(not sys.is_atomic):
             self.set_intra(i0, n, m.natoms, m.intra)
 
-    
+    def test_addbond(self, i, j, btyp, maxi=0, maxj=0, ityp=0, jtyp=0): #, atyp, dtyp, imtyp, toffset):
+        #currently there are no special bonds / exclusion for dynamic bonds
+        sys = self.system
+        if i<j:
+            self.bonds_np = np.append(self.bonds_np, [[btyp, i, j]], axis=0)
+        else:
+            self.bonds_np = np.append(self.bonds_np, [[btyp, j, i]], axis=0)
+        if maxi and self.nbond_per_atom_np[i]+1 > maxi:
+            sys.type_np[i] = ityp
+        if maxj and self.nbond_per_atom_np[j]+1 > maxj:
+            sys.type_np[j] = jtyp
+        self.update_topo()
+                        
     def set_intra(self, i0, nmolec, natoms, imat):
         for i in range(nmolec):
             istart = i0 + i * natoms
@@ -140,7 +153,6 @@ class ClassicalFF(ForceField):
             for l in range(natoms):
                 for m in range(natoms):
                     self.intra[istart + l, istart + m] = imat[l, m]
-
 
     def build(self):
         sys = self.system
@@ -165,27 +177,59 @@ class ClassicalFF(ForceField):
         if ti.static(not sys.is_atomic and self.bonds != None):
             for k, v in self.bonds_params_d.items():
                 self.bonds_params[k] = self.bonds.fill_params(*v)
-            self.bonds_np = np.vstack(self.bonds_np)
-            self.bond.from_numpy(self.bonds_np) #self.bond as bond list
-            self.nbonds = self.bonds_np.shape[0]
         # build angles table
         if ti.static(not sys.is_atomic and self.angles != None):
             for k, v in self.angles_params_d.items():
                 self.angles_params[k] = self.angle.fill_params(*v)
+        # build dihedrals table
+        if ti.static(not sys.is_atomic and self.dihedrals != None):
+            for k, v in self.dihedrals_params_d.items():
+                self.dihedrals_params[k] = self.dihedrals.fill_params(*v)
+        # build impropers table
+        if ti.static(not sys.is_atomic and self.impropers != None):
+            for k, v in self.impropers_params_d.items():
+                self.impropers_params[k] = self.impropers.fill_params(*v)
+                
+        self.update_topo()
+
+    def update_topo(self):
+        sys = self.system
+        if hasattr(sys, "type_np"):
+            from_numpy_chk(self.system.type, sys.type_np)
+        if ti.static(not sys.is_atomic and self.bonds != None):
+            self.bonds_np = np.vstack(self.bonds_np)
+            self.bond.from_numpy(self.bonds_np) #self.bond as bond list
+            self.nbonds = self.bonds_np.shape[0]
+            
+            self.nbond_per_atom_np = []
+            for aid in range(sys.n_particles):
+                count = 0
+                for bond in self.bonds_np:
+                    try:
+                        #print(bond)
+                        if bond[1] == aid or bond[2] == aid: #all atomids involved here start from 0
+                            count += 1
+                    except:
+                        print(bond)
+                self.nbond_per_atom_np.append(count)
+        # build angles table
+        if ti.static(not sys.is_atomic and self.angles != None):
             self.angles_np = np.vstack(self.angles_np)
             self.angle.from_numpy(self.angles_np) #self.angle as internally saved angles list
             # workaround
             self.nangles = self.angles_np.shape[0]
         # build dihedrals table
         if ti.static(not sys.is_atomic and self.dihedrals != None):
-            for k, v in self.dihedrals_params_d.items():
-                self.dihedrals_params[k] = self.dihedrals.fill_params(*v)
-            self.dihedral.from_numpy(np.vstack(self.dihedrals_np)) #self.dihedral as dihedrals list
+            self.dihedrals_np = np.vstack(self.dihedrals_np)
+            self.dihedral.from_numpy(self.dihedrals_np) #self.dihedral as dihedrals list
+            self.ndihedrals = self.dihedrals_np.shape[0]
         # build impropers table
         if ti.static(not sys.is_atomic and self.impropers != None):
-            for k, v in self.impropers_params_d.items():
-                self.impropers_params[k] = self.impropers.fill_params(*v)
-            self.improper.from_numpy(np.vstack(self.impropers_np)) #self.improper as impropers list
+            self.impropers_np = np.vstack(self.imperopers_np)
+            self.improper.from_numpy(self.impropers_np) #self.improper as impropers list
+            self.nimpropers = self.impropers_np.shape[0]    
+            
+        #TODO: rebuild special table with adjacent matrices (a global one which would be quite inefficient)    
 
     @ti.func
     def force_nonbond(self, i, j):

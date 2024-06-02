@@ -401,8 +401,6 @@ class MolecularDynamics(Simulation):
         else:
             self.velocity.fill(0)
         self.energy.calculate_energy()
-        
-
     
     def randomize_velocity(self, keep_molecules=True):
         vs = np.random.random((self.n_particles, DIM)) - 0.5
@@ -430,5 +428,9 @@ class MolecularDynamics(Simulation):
         else:
             self.velocity.fill(0)
         self.energy.calculate_energy()
+        
+    def test_addbond(self, fixlabel, i, j, btyp, maxi=0, maxj=0, ityp=0, jtyp=0, tevery=1, toffset=0):
+        self.forcefield.test_addbond(i, j, btyp)
+        return fixlabel
 
 
